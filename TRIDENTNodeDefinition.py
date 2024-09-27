@@ -63,7 +63,7 @@ class TRIDENTNodeDefinition(NodeDefinition):
         doms = x[:, self._id_columns]
         unique_values, inverse, dom_counts = np.unique(doms, return_inverse=True, return_counts=True, axis=0)
     
-        x[:, charge_index] = dom_counts[inverse] / len(doms)
+        x[:, charge_index] = dom_counts[inverse] #/ len(doms)
         
         # group doms and set time to median time
         x_= []
