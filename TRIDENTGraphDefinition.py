@@ -41,6 +41,7 @@ class TRIDENTGraphDefinition(GraphDefinition):
         self,
         detector: TRIDENT = TRIDENT(),
         node_definition: TRIDENTNodeDefinition = TRIDENTNodeDefinition(),
+        input_feature_names: Optional[List[str]] = None,
     ) -> None:
         
         super().__init__(

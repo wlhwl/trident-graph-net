@@ -35,6 +35,7 @@ class TRIDENTNodeDefinition(NodeDefinition):
         return self.output_feature_names
 
     def _construct_nodes(self, x: torch.Tensor) -> Data:
+        print(f'Start. x shape: {x.shape}')
         x = x.numpy()
 
         if x.shape[0] == 0:
@@ -63,16 +64,17 @@ class TRIDENTNodeDefinition(NodeDefinition):
         doms = x[:, self._id_columns]
         unique_values, inverse, dom_counts = np.unique(doms, return_inverse=True, return_counts=True, axis=0)
     
-        x[:, charge_index] = dom_counts[inverse] / len(doms)
+        x[:, charge_index] = dom_counts[inverse] #/ len(doms)
         
         # group doms and set time to median time
         x_= []
         for ids in unique_values:
-            mask = np.where(x[:, self._id_columns] == ids)[0]
+            mask = np.where((x[:, self._id_columns] == ids).all(axis=1))[0]
             t_median = np.median(x[mask, self._time_index])
             x_.append([*ids, t_median, *x[mask[0], charge_index:]])
         
         x = np.array(x_)        
         #node: [nx, ny, nz, t-t0, nhits, norm]
-        
+        print(f'End. x shape: {x.shape}')
+        print(f'Num hits: {x[:, 4].sum()}')       
         return Data(x=torch.tensor(x))

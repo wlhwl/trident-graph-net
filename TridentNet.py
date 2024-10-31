@@ -133,16 +133,16 @@ class TridentTrackNet(Model):
         return n
 
     def post_process(self, predict, batch):
-        node_pos = batch.pos
-        node_t = batch.t
-        node_weight = batch.node_weight
+        node_pos = batch.x[:,0:3]
+        node_t = batch.x[:,3]
+        node_weight = batch.x[:,4]
         preds = self.LineFit(node_t, node_pos+predict, node_weight, batch.batch)
         return preds
 
 
     def forward(self, batch: Data):
         fts = self.input_bn(batch.x)
-        pts = batch.pos
+        pts = batch.x[:,0:3]
 
         u = torch_geometric.nn.global_mean_pool(fts, batch.batch)
         u = self.global_process[0](u)
