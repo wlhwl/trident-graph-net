@@ -158,5 +158,5 @@ class TridentTrackNet(Model):
             x = layer(x)
 
         x = self.output_mlp_linear(x)
-        return self.post_process(x, batch)
+        return x, self.post_process(x, batch)
         

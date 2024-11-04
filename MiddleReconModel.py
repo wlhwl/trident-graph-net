@@ -49,11 +49,10 @@ class MiddleReconModel(Model):
     ) -> Tensor:
         """Compute and sum losses."""
         data_merged: Dict[str, Tensor] = {}
-        for label in data[0].keys():
-            tensors = [d[label] if isinstance(d[label], Tensor) else torch.tensor(d[label]) for d in data]
-            data_merged[label] = torch.stack(tensors, dim=0)
-
-        loss = torch.nn.functional.mse_loss(outputs, data_merged['target'])
+        data_merged['inject_pos'] = torch.cat([d['inject_pos'] for d in data], dim=0)
+        # print(outputs)
+        # print(data['inject_pos'])
+        loss = torch.nn.functional.mse_loss(outputs, data_merged['inject_pos'])
 
         if verbose:
             self.info(f"Loss: {loss.item()}")
@@ -65,15 +64,15 @@ class MiddleReconModel(Model):
         """Forward pass, chaining model components."""
         if isinstance(data, Data):
             data = [data]
-        output_list = []
+        output_list, pred_list = [], []
         for d in data:
-            output = self.backbone(d)
+            output,pred = self.backbone(d)
             output_list.append(output)
-            # pred_list.append(pred)
+            pred_list.append(pred)
         outputs = torch.cat(output_list, dim=0)
-        # preds = torch.cat(pred_list, dim=0)
+        preds = torch.cat(pred_list, dim=0)
 
-        return outputs#, preds
+        return outputs, preds
 
     def shared_step(self, batch: List[Data], batch_idx: int) -> Tensor:
         """Perform shared step.
@@ -81,7 +80,7 @@ class MiddleReconModel(Model):
         Applies the forward pass and the following loss calculation, shared
         between the training and validation step.
         """
-        outputs = self(batch)
+        outputs, preds = self(batch)
         loss = self.compute_loss(outputs, batch)
         return loss
 
@@ -320,6 +319,7 @@ class MiddleReconModel(Model):
         ]
         return {"outputs": outputs, "preds": predictions}
 
+
     def predict_as_dataframe(
         self,
         dataloader: DataLoader,
@@ -335,7 +335,7 @@ class MiddleReconModel(Model):
         DataFrame.
         """
         if prediction_columns is None:
-            prediction_columns = ["prediction"]
+            prediction_columns = self.prediction_labels
 
         if additional_attributes is None:
             additional_attributes = []
@@ -361,9 +361,9 @@ class MiddleReconModel(Model):
             gpus=gpus,
             distribution_strategy=distribution_strategy,
         )
-        outputs = predictions_torch["outputs"]
+        outputs, predictions = predictions_torch["outputs"], predictions_torch["preds"]
         predictions = (
-            torch.cat(outputs, dim=1).detach().cpu().numpy()
+            torch.cat(predictions, dim=1).detach().cpu().numpy()
         )
         assert len(prediction_columns) == predictions.shape[1], (
             f"Number of provided column names ({len(prediction_columns)}) and "
