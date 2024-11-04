@@ -134,8 +134,8 @@ class TridentTrackNet(Model):
 
     def post_process(self, predict, batch):
         node_pos = batch.x[:,0:3]
-        node_t = batch.x[:,3]
-        node_weight = batch.x[:,4]
+        node_t = batch.t1st
+        node_weight = batch.nhits
         preds = self.LineFit(node_t, node_pos+predict, node_weight, batch.batch)
         return preds
 
@@ -158,5 +158,5 @@ class TridentTrackNet(Model):
             x = layer(x)
 
         x = self.output_mlp_linear(x)
-        return x, self.post_process(x, batch)
+        return self.post_process(x, batch)
         

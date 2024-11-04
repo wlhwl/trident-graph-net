@@ -8,6 +8,7 @@ from torch_geometric.data import Data
 from graphnet.models.detector.detector import Detector
 from graphnet.constants import PROMETHEUS_GEOMETRY_TABLE_DIR
 import os
+import math
 
 class TRIDENT(Detector):
     geometry_table_path = os.path.join(
@@ -109,11 +110,30 @@ class TRIDENTGraphDefinition(GraphDefinition):
                 graph=graph, custom_label_functions=custom_label_functions
             )
 
+        if len(input_features) > 0:
+            first_hit = input_features[torch.min(input_features[:, 3],dim=0)[1]]
+            graph.pos = input_features[:,0:3]-first_hit[0:3]
+            graph.vertex = torch.stack([graph.initial_state_x,graph.initial_state_y,graph.initial_state_z],dim=1) - first_hit[0:3]
+            graph.inject_pos = self.inject_pos(graph)
+
         # Attach node features as seperate fields. MAY NOT CONTAIN 'x'
         graph = self._add_features_individually(
             graph=graph, node_feature_names=node_feature_names
         )
-
         # Add GraphDefinition Stamp
         graph["graph_definition"] = self.__class__.__name__
         return graph    
+    
+    def inject_pos(self,graph):
+
+        n_water = 1.385  # for pure water
+        costh = 1 / n_water
+        tanth = math.sqrt(1 - costh*costh) / costh
+        graph.vertex = graph.vertex.view(-1)
+        graph.direction = graph.direction.view(-1)
+
+        vr = graph.pos - graph.vertex
+        l = (vr * graph.direction).sum(dim=1).view(-1,1)
+        d = ((vr**2).sum(dim=1).view(-1,1) - l**2).clip(min=0)**0.5
+        inject_pos = graph.vertex + (l -  d / tanth) * graph.direction - graph.pos
+        return inject_pos
