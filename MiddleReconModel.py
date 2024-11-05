@@ -14,6 +14,7 @@ from pytorch_lightning.loggers import Logger as LightningLogger
 
 from graphnet.training.callbacks import ProgressBar
 from graphnet.models.model import Model
+from pytorch_lightning.strategies import DDPStrategy
 
 class MiddleReconModel(Model):
     """A suggested Model class that comes with simple user syntax.
@@ -49,7 +50,7 @@ class MiddleReconModel(Model):
     ) -> Tensor:
         """Compute and sum losses."""
         data_merged: Dict[str, Tensor] = {}
-        data_merged['inject_pos'] = torch.cat([d['inject_pos'] for d in data], dim=0)
+        data_merged['inject_pos'] = torch.cat([d['inject_pos'] for d in data], dim=0).float()
         # print(outputs)
         # print(data['inject_pos'])
         loss = torch.nn.functional.mse_loss(outputs, data_merged['inject_pos'])
@@ -67,8 +68,8 @@ class MiddleReconModel(Model):
         output_list, pred_list = [], []
         for d in data:
             output,pred = self.backbone(d)
-            output_list.append(output)
-            pred_list.append(pred)
+            output_list.append(output.float())
+            pred_list.append(pred.float())
         outputs = torch.cat(output_list, dim=0)
         preds = torch.cat(pred_list, dim=0)
 
@@ -92,7 +93,8 @@ class MiddleReconModel(Model):
         logger: Optional[LightningLogger] = None,
         log_every_n_steps: int = 1,
         gradient_clip_val: Optional[float] = None,
-        distribution_strategy: Optional[str] = "ddp",
+        # distribution_strategy: Optional[str] = "ddp",
+        strategy: Optional[Union[str, DDPStrategy]] = None,
         **trainer_kwargs: Any,
     ) -> Trainer:
         if gpus:
@@ -110,7 +112,7 @@ class MiddleReconModel(Model):
             log_every_n_steps=log_every_n_steps,
             logger=logger,
             gradient_clip_val=gradient_clip_val,
-            strategy=distribution_strategy,
+            strategy=strategy,
             **trainer_kwargs,
         )
 
@@ -156,7 +158,7 @@ class MiddleReconModel(Model):
                 " not automatically be loaded after training!"
                 ""
             )
-
+        strategy = DDPStrategy(find_unused_parameters=True) if distribution_strategy == "ddp" else distribution_strategy
         self.train(mode=True)
         trainer = self._construct_trainer(
             max_epochs=max_epochs,
@@ -165,7 +167,8 @@ class MiddleReconModel(Model):
             logger=logger,
             log_every_n_steps=log_every_n_steps,
             gradient_clip_val=gradient_clip_val,
-            distribution_strategy=distribution_strategy,
+            # distribution_strategy=distribution_strategy,
+            strategy=strategy,
             **trainer_kwargs,
         )
 

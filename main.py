@@ -6,7 +6,7 @@ from MiddleReconModel import MiddleReconModel
 
 config: Dict[str, Any] = {
         "path": "./datasets",
-        "batch_size": 3,
+        "batch_size": 10,
         "num_workers": 1,
         "target": "direction",
         "early_stopping_patience":5,
@@ -35,7 +35,7 @@ if __name__ == '__main__':
 
     backbone = TridentTrackNet(settings=default_net_setting,DEVICE="cpu")
 
-    batch = next(iter(training_dataloader))
+    # batch = next(iter(training_dataloader))
 
     model = MiddleReconModel(
             backbone=backbone,

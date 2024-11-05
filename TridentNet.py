@@ -129,20 +129,20 @@ class TridentTrackNet(Model):
             yt - y0*t0 / sum_weights,
             zt - z0*t0 / sum_weights
         ], dim=1)
-        n = n / (tt - t0*t0/sum_weights).view(-1, 1)
+        n = n / (tt - t0*t0/sum_weights).view(-1, 1).float()
         return n
 
     def post_process(self, predict, batch):
-        node_pos = batch.x[:,0:3]
-        node_t = batch.t1st
-        node_weight = batch.nhits
+        node_pos = batch.x[:,0:3].float()
+        node_t = batch.t1st.float()
+        node_weight = batch.nhits.float()
         preds = self.LineFit(node_t, node_pos+predict, node_weight, batch.batch)
         return preds
 
 
     def forward(self, batch: Data):
-        fts = self.input_bn(batch.x)
-        pts = batch.x[:,0:3]
+        fts = self.input_bn(batch.x.float())
+        pts = batch.x[:,0:3].float()
 
         u = torch_geometric.nn.global_mean_pool(fts, batch.batch)
         u = self.global_process[0](u)
