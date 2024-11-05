@@ -1,44 +1,52 @@
-"""
-Setup dataloaders
-"""
-from graphnet.models.graphs import KNNGraph
-from graphnet.models.detector.prometheus import TRIDENT1211
-from dataset import get_dataloaders
-graph_definition = KNNGraph(detector = TRIDENT1211(), nb_nearest_neighbours=16)
-dataloaders = get_dataloaders(graph_definition=graph_definition)
+from typing import Dict, Any
+from TRIDENTGraphDefinition import TRIDENT, TRIDENTGraphDefinition
+from graphnet.datasets import TRIDENTSmall
+from TridentNet import TridentTrackNet, default_net_setting
+from MiddleReconModel import MiddleReconModel
 
-"""
-Set up network
-"""
-from TridentModel import TridentNet, default_net_setting
-from graphnet.models.gnn import DynEdge
-# backbone = TridentNet(default_net_setting, 'cpu')
-# Select backbone
-backbone = DynEdge(nb_inputs = graph_definition.nb_outputs,
-                  global_pooling_schemes=["min", "max", "mean"])
+config: Dict[str, Any] = {
+        "path": "./datasets",
+        "batch_size": 10,
+        "num_workers": 1,
+        "target": "direction",
+        "early_stopping_patience":5,
+        "fit": {
+            "gpus": [0],
+            "max_epochs": 200,
+        },
+    }
 
+features = ['sensor_pos_x','sensor_pos_y','sensor_pos_z', "t"]
 
-"""
-Setup task and Loss function
-"""
-from task import get_task
-task = get_task(backbone=backbone)
+graph_definition= TRIDENTGraphDefinition(detector = TRIDENT(),
+                                input_feature_names=features)
 
+if __name__ == '__main__':
+    data_module = TRIDENTSmall(graph_definition = graph_definition,
+                        download_dir = config["path"],
+                        train_dataloader_kwargs = {
+                            'batch_size': config["batch_size"],
+                            'num_workers': config["num_workers"],
+                            },
+                        backend = 'sqlite')
 
-import torch
-from MyStandardModel import MyStandardModel
-model: MyStandardModel = MyStandardModel(graph_definition = graph_definition,
-                      backbone = backbone,
-                      tasks = task)
+    training_dataloader = data_module.train_dataloader
+    validation_dataloader = data_module.val_dataloader
 
-import os
+    backbone = TridentTrackNet(settings=default_net_setting,DEVICE="cpu")
 
-l = dataloaders['test_dataloader']
-# only use small set of data
-data_num = 50
-_, s = torch.utils.data.random_split(l.dataset, [len(l.dataset)-data_num, data_num])
-import graphnet.data.dataloader as dataLoader
-l = dataLoader.DataLoader(s, batch_size=10, num_workers=2, shuffle=False)
-print(l.dataset[0])
+    # batch = next(iter(training_dataloader))
 
-print(model.predict(dataloader=l))
+    model = MiddleReconModel(
+            backbone=backbone,
+            optimizer_kwargs={"lr": 1e-03},
+            scheduler_kwargs={
+                "patience": 2,
+            },
+            scheduler_config={
+                "frequency": 1,
+                "monitor": "val_loss",
+            },
+        )
+
+    model.fit(train_dataloader=training_dataloader)

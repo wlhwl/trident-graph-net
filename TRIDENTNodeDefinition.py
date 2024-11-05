@@ -77,4 +77,4 @@ class TRIDENTNodeDefinition(NodeDefinition):
         #node: [nx, ny, nz, t-t0, nhits, norm]
         print(f'End. x shape: {x.shape}')
         print(f'Num hits: {x[:, 4].sum()}')       
-        return Data(x=torch.tensor(x))
+        return Data(x=torch.tensor(x,dtype=torch.float))

@@ -6,7 +6,6 @@ import torch
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torch import Tensor
-from torch.nn import ModuleList
 from torch.optim import Adam
 from torch.utils.data import DataLoader, SequentialSampler
 from torch_geometric.data import Data
@@ -14,14 +13,8 @@ import pandas as pd
 from pytorch_lightning.loggers import Logger as LightningLogger
 
 from graphnet.training.callbacks import ProgressBar
-from graphnet.models.graphs import GraphDefinition
-from graphnet.models.gnn.gnn import GNN
 from graphnet.models.model import Model
-from graphnet.models.task import StandardLearnedTask
-
-from graphnet.models.easy_model import EasySyntax
-from graphnet.models import StandardModel
-
+from pytorch_lightning.strategies import DDPStrategy
 
 class MiddleReconModel(Model):
     """A suggested Model class that comes with simple user syntax.
@@ -33,7 +26,7 @@ class MiddleReconModel(Model):
     def __init__(
         self,
         *,
-        tasks: Union[StandardLearnedTask, List[StandardLearnedTask]],
+        backbone: Model = None,
         optimizer_class: Type[torch.optim.Optimizer] = Adam,
         optimizer_kwargs: Optional[Dict] = None,
         scheduler_class: Optional[type] = None,
@@ -44,60 +37,42 @@ class MiddleReconModel(Model):
         # Base class constructor
         super().__init__(name=__name__, class_name=self.__class__.__name__)
 
-        # Check(s)
-        if not isinstance(tasks, (list, tuple)):
-            tasks = [tasks]
-
         # Member variable(s)
-        self._tasks = ModuleList(tasks)
         self._optimizer_class = optimizer_class
         self._optimizer_kwargs = optimizer_kwargs or dict()
         self._scheduler_class = scheduler_class
         self._scheduler_kwargs = scheduler_kwargs or dict()
         self._scheduler_config = scheduler_config or dict()
-
-        self.validate_tasks()
+        self.backbone = backbone
 
     def compute_loss(
         self, outputs: Tensor, data: List[Data], verbose: bool = False
     ) -> Tensor:
-        """Compute and sum losses across tasks."""
-        data_merged = {}
-        target_labels_merged = list(set(self.target_labels))
-        for label in target_labels_merged:
-            data_merged[label] = torch.cat([d[label] for d in data], dim=0)
-        for task in self._tasks:
-            if task._loss_weight is not None:
-                data_merged[task._loss_weight] = torch.cat(
-                    [d[task._loss_weight] for d in data], dim=0
-                )
+        """Compute and sum losses."""
+        data_merged: Dict[str, Tensor] = {}
+        data_merged['inject_pos'] = torch.cat([d['inject_pos'] for d in data], dim=0).float()
+        # print(outputs)
+        # print(data['inject_pos'])
+        loss = torch.nn.functional.mse_loss(outputs, data_merged['inject_pos'])
 
-        losses = [
-            task.compute_loss(output, data_merged)
-            for task, output in zip(self._tasks, outputs)
-        ]
         if verbose:
-            self.info(f"{losses}")
-        assert all(
-            loss.dim() == 0 for loss in losses
-        ), "Please reduce loss for each task separately"
-        return torch.sum(torch.stack(losses))
+            self.info(f"Loss: {loss.item()}")
+        return loss
 
     def forward(
         self, data: Union[Data, List[Data]]
-    ) -> List[Union[Tensor, Data]]:
+    ) -> Tensor:
         """Forward pass, chaining model components."""
         if isinstance(data, Data):
             data = [data]
         output_list, pred_list = [], []
         for d in data:
-            output, pred = self.backbone(d)
-            output_list.append(output)
-            pred_list.append()
+            output,pred = self.backbone(d)
+            output_list.append(output.float())
+            pred_list.append(pred.float())
         outputs = torch.cat(output_list, dim=0)
-        pred = torch.cat(pred_list, dim=0)
+        preds = torch.cat(pred_list, dim=0)
 
-        preds = [task(pred) for task in self._tasks]
         return outputs, preds
 
     def shared_step(self, batch: List[Data], batch_idx: int) -> Tensor:
@@ -110,12 +85,6 @@ class MiddleReconModel(Model):
         loss = self.compute_loss(outputs, batch)
         return loss
 
-    def validate_tasks(self) -> None:
-        """Verify that self._tasks contain compatible elements."""
-        accepted_tasks = StandardLearnedTask
-        for task in self._tasks:
-            assert isinstance(task, accepted_tasks)
-
     @staticmethod
     def _construct_trainer(
         max_epochs: int = 10,
@@ -124,7 +93,8 @@ class MiddleReconModel(Model):
         logger: Optional[LightningLogger] = None,
         log_every_n_steps: int = 1,
         gradient_clip_val: Optional[float] = None,
-        distribution_strategy: Optional[str] = "ddp",
+        # distribution_strategy: Optional[str] = "ddp",
+        strategy: Optional[Union[str, DDPStrategy]] = None,
         **trainer_kwargs: Any,
     ) -> Trainer:
         if gpus:
@@ -142,7 +112,7 @@ class MiddleReconModel(Model):
             log_every_n_steps=log_every_n_steps,
             logger=logger,
             gradient_clip_val=gradient_clip_val,
-            strategy=distribution_strategy,
+            strategy=strategy,
             **trainer_kwargs,
         )
 
@@ -164,7 +134,6 @@ class MiddleReconModel(Model):
         distribution_strategy: Optional[str] = "ddp",
         **trainer_kwargs: Any,
     ) -> None:
-        """Fit `StandardModel` using `pytorch_lightning.Trainer`."""
         # Checks
         if callbacks is None:
             # We create the bare-minimum callbacks for you.
@@ -189,7 +158,7 @@ class MiddleReconModel(Model):
                 " not automatically be loaded after training!"
                 ""
             )
-
+        strategy = DDPStrategy(find_unused_parameters=True) if distribution_strategy == "ddp" else distribution_strategy
         self.train(mode=True)
         trainer = self._construct_trainer(
             max_epochs=max_epochs,
@@ -198,7 +167,8 @@ class MiddleReconModel(Model):
             logger=logger,
             log_every_n_steps=log_every_n_steps,
             gradient_clip_val=gradient_clip_val,
-            distribution_strategy=distribution_strategy,
+            # distribution_strategy=distribution_strategy,
+            strategy=strategy,
             **trainer_kwargs,
         )
 
@@ -236,18 +206,6 @@ class MiddleReconModel(Model):
             if isinstance(cbck, callback):
                 return True
         return False
-
-    @property
-    def target_labels(self) -> List[str]:
-        """Return target label."""
-        return [label for task in self._tasks for label in task._target_labels]
-
-    @property
-    def prediction_labels(self) -> List[str]:
-        """Return prediction labels."""
-        return [
-            label for task in self._tasks for label in task._prediction_labels
-        ]
 
     def configure_optimizers(self) -> Dict[str, Any]:
         """Configure the model's optimizer(s)."""
@@ -321,15 +279,11 @@ class MiddleReconModel(Model):
 
     def inference(self) -> None:
         """Activate inference mode."""
-        for task in self._tasks:
-            task.inference()
+        self.eval()
 
     def train(self, mode: bool = True) -> "Model":
         """Deactivate inference mode."""
         super().train(mode)
-        if mode:
-            for task in self._tasks:
-                task.train_eval()
         return self
 
     def predict(
@@ -367,6 +321,7 @@ class MiddleReconModel(Model):
             for ix in range(len(predictions[0]))
         ]
         return {"outputs": outputs, "preds": predictions}
+
 
     def predict_as_dataframe(
         self,
